@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 using TMPro;
 
 /// <summary>
-/// Phone-only "holding / lobby" scene for I Need Vitamin C.
+/// Phone-only "holding / lobby" scene for GoWithTheCrow 同流合乌.
 /// Shows the room code, counts connected phones, and enables "Start"
 /// once at least one phone is connected.
 ///
@@ -20,6 +20,11 @@ public class PhoneStartSceneManager : MonoBehaviour
 {
     [Header("Scene Navigation")]
     [SerializeField] private string nextSceneName = "InstructionScene";
+    [SerializeField] private string englishNextSceneName = "EnglishInstructionScene";
+
+    [Header("Language")]
+    [Tooltip("Sets GameConfig.Language on Awake. Default = Chinese instruction/end scenes; English = English variants.")]
+    [SerializeField] private GameLanguage language = GameLanguage.Default;
 
     [Header("Networking Prefabs")]
     [SerializeField] private WebSocketClient wsClientPrefab;
@@ -35,8 +40,16 @@ public class PhoneStartSceneManager : MonoBehaviour
     [Header("Per-Player Slots (assign in Inspector)")]
     [SerializeField] private GameObject player1Slot;
     [SerializeField] private TMP_Text   player1NameText;
+    [SerializeField] private Image      player1Image;
+    [SerializeField] private GameObject player1PressHint;
     [SerializeField] private GameObject player2Slot;
     [SerializeField] private TMP_Text   player2NameText;
+    [SerializeField] private Image      player2Image;
+    [SerializeField] private GameObject player2PressHint;
+
+    [Header("Character Sprites (pending shown until ready; ready swaps on press)")]
+    [SerializeField] private Sprite pendingSprite;
+    [SerializeField] private Sprite readySprite;
 
     private bool p1Ready;
     private bool p2Ready;
@@ -46,6 +59,7 @@ public class PhoneStartSceneManager : MonoBehaviour
     {
         GameConfig.EnsureExists();
         GameConfig.Instance.Mode = ControlMode.Phone;
+        GameConfig.Instance.Language = language;
     }
 
     private void Start()
@@ -65,8 +79,21 @@ public class PhoneStartSceneManager : MonoBehaviour
         JoystickNetworkManager.Instance.OnPlayerConnected    += HandlePlayerConnected;
         JoystickNetworkManager.Instance.OnPlayerDisconnected += HandlePlayerDisconnected;
 
+        if (player1PressHint == null && player1Slot != null)
+        {
+            var t = player1Slot.transform.Find("textbox");
+            if (t != null) player1PressHint = t.gameObject;
+        }
+        if (player2PressHint == null && player2Slot != null)
+        {
+            var t = player2Slot.transform.Find("textbox");
+            if (t != null) player2PressHint = t.gameObject;
+        }
+
         if (player1Slot != null) player1Slot.SetActive(false);
         if (player2Slot != null) player2Slot.SetActive(false);
+        if (player1PressHint != null) player1PressHint.SetActive(false);
+        if (player2PressHint != null) player2PressHint.SetActive(false);
 
         JoystickNetworkManager.Instance.CreateRoomAndConnect();
         RefreshUI();
@@ -75,32 +102,51 @@ public class PhoneStartSceneManager : MonoBehaviour
     private void HandlePlayerConnected(int playerId, string name)
     {
         string displayName = string.IsNullOrEmpty(name) ? $"Player {playerId}" : name;
+        int idx = playerId - 1;
+        if (GameConfig.Instance != null && idx >= 0 && idx < GameConfig.Instance.PlayerNames.Length)
+            GameConfig.Instance.PlayerNames[idx] = displayName;
         if (playerId == 1)
         {
             if (player1Slot != null) player1Slot.SetActive(true);
             if (player1NameText != null) player1NameText.text = displayName;
+            SetSprite(player1Image, pendingSprite);
+            if (player1PressHint != null) player1PressHint.SetActive(!p1Ready);
         }
         else if (playerId == 2)
         {
             if (player2Slot != null) player2Slot.SetActive(true);
             if (player2NameText != null) player2NameText.text = displayName;
+            SetSprite(player2Image, pendingSprite);
+            if (player2PressHint != null) player2PressHint.SetActive(!p2Ready);
         }
         RefreshUI();
     }
 
     private void HandlePlayerDisconnected(int playerId)
     {
+        int idx = playerId - 1;
+        if (GameConfig.Instance != null && idx >= 0 && idx < GameConfig.Instance.PlayerNames.Length)
+            GameConfig.Instance.PlayerNames[idx] = null;
         if (playerId == 1)
         {
             p1Ready = false;
             if (player1Slot != null) player1Slot.SetActive(false);
+            SetSprite(player1Image, pendingSprite);
+            if (player1PressHint != null) player1PressHint.SetActive(false);
         }
         else if (playerId == 2)
         {
             p2Ready = false;
             if (player2Slot != null) player2Slot.SetActive(false);
+            SetSprite(player2Image, pendingSprite);
+            if (player2PressHint != null) player2PressHint.SetActive(false);
         }
         RefreshUI();
+    }
+
+    private static void SetSprite(Image img, Sprite sprite)
+    {
+        if (img != null && sprite != null) img.sprite = sprite;
     }
 
     private void Update()
@@ -110,8 +156,20 @@ public class PhoneStartSceneManager : MonoBehaviour
         var pim = PhoneInputManager.Instance;
         if (pim != null)
         {
-            if (!p1Ready && pim.ConsumeAction(0)) { p1Ready = true; RefreshUI(); }
-            if (!p2Ready && pim.ConsumeAction(1)) { p2Ready = true; RefreshUI(); }
+            if (!p1Ready && pim.ConsumeAction(0))
+            {
+                p1Ready = true;
+                SetSprite(player1Image, readySprite);
+                if (player1PressHint != null) player1PressHint.SetActive(false);
+                RefreshUI();
+            }
+            if (!p2Ready && pim.ConsumeAction(1))
+            {
+                p2Ready = true;
+                SetSprite(player2Image, readySprite);
+                if (player2PressHint != null) player2PressHint.SetActive(false);
+                RefreshUI();
+            }
         }
 
         int count = GameConfig.Instance?.ConnectedPhoneCount ?? 0;
@@ -156,7 +214,9 @@ public class PhoneStartSceneManager : MonoBehaviour
 
     private void LoadNextScene()
     {
-        SceneManager.LoadScene(nextSceneName);
+        bool english = language == GameLanguage.English;
+        string target = english && !string.IsNullOrEmpty(englishNextSceneName) ? englishNextSceneName : nextSceneName;
+        SceneManager.LoadScene(target);
     }
 
 #if UNITY_EDITOR
@@ -181,8 +241,8 @@ public class PhoneStartSceneManager : MonoBehaviour
         holdingPanel = MakePanel(canvasGO.transform, "HoldingPanel");
         holdingPanel.SetActive(true);
 
-        Txt(holdingPanel.transform, "Title",   "I Need Vitamin C", 80, C_ACCENT, FontStyles.Bold,   0,  340);
-        Txt(holdingPanel.transform, "Sub",     "I NEED VITAMIN C", 22, C_DIM,    FontStyles.Normal, 0,  275, 0.2f);
+        Txt(holdingPanel.transform, "Title",   "GoWithTheCrow",    80, C_ACCENT, FontStyles.Bold,   0,  340);
+        Txt(holdingPanel.transform, "Sub",     "同流合乌",          22, C_DIM,    FontStyles.Normal, 0,  275, 0.2f);
         roomCodeText    = Txt(holdingPanel.transform, "RoomCode",    "——", 160, C_TEXT, FontStyles.Bold,   0,  100);
         playerCountText = Txt(holdingPanel.transform, "PlayerCount", "",    26, C_DIM,  FontStyles.Normal, 0,  -20);
 

@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -18,6 +19,11 @@ public class Control : MonoBehaviour
     [SerializeField] private Vector3 spawnHalfExtents = new Vector3(0.45f, 0.45f, 0.45f);
     [SerializeField] private int spawnClearanceAttempts = 30;
 
+    [Header("Orange Spawning")]
+    [SerializeField] private Orange orangePrefab;
+    [SerializeField] private float[] orangeSpawnTimes = new float[] { 4f, 20f, 34f, 53f, 69f };
+    [SerializeField] private float orangeSpawnY = 0.5f;
+
     private void Start()
     {
         Player[] spawnedPlayers = SpawnPlayers();
@@ -26,6 +32,32 @@ public class Control : MonoBehaviour
         if (GameManager.Instance != null)
         {
             GameManager.Instance.RegisterPlayers(spawnedPlayers);
+        }
+
+        if (orangePrefab != null && orangeSpawnTimes != null && orangeSpawnTimes.Length > 0)
+        {
+            StartCoroutine(OrangeSpawnSchedule());
+        }
+    }
+
+    private IEnumerator OrangeSpawnSchedule()
+    {
+        float[] times = (float[])orangeSpawnTimes.Clone();
+        System.Array.Sort(times);
+
+        float elapsed = 0f;
+        for (int i = 0; i < times.Length; i++)
+        {
+            float wait = times[i] - elapsed;
+            if (wait > 0f) yield return new WaitForSeconds(wait);
+            elapsed = times[i];
+
+            if (GameManager.Instance != null && GameManager.Instance.IsGameOver())
+                yield break;
+
+            Vector3 pos = ScreenBoundsUtility.GetRandomPointInsideVisibleWorld(orangeSpawnY);
+            pos.y = orangeSpawnY;
+            Instantiate(orangePrefab, pos, Quaternion.identity);
         }
     }
 

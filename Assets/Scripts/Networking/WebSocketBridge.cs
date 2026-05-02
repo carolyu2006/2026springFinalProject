@@ -57,18 +57,47 @@ public class WebSocketBridge
     {
         _uri = uri;
         _cws = new ClientWebSocket();
+        // Cloudflare's WebSocket edge sometimes hangs the upgrade if there's
+        // no User-Agent. Setting one lets the handshake complete on Mono.
+        try { _cws.Options.SetRequestHeader("User-Agent", "Unity-WebSocketBridge/1.0"); }
+        catch (Exception) { /* some platforms reject custom headers; safe to ignore */ }
         _cts = new CancellationTokenSource();
     }
 
     public IEnumerator Connect()
     {
+        const float ConnectTimeoutSeconds = 10f;
         var task = _cws.ConnectAsync(_uri, _cts.Token);
+        float elapsed = 0f;
         while (!task.IsCompleted)
+        {
+            elapsed += UnityEngine.Time.unscaledDeltaTime;
+            if (elapsed > ConnectTimeoutSeconds)
+            {
+                Error = $"Connect timed out after {ConnectTimeoutSeconds}s ({_uri})";
+                _cts.Cancel();
+                yield break;
+            }
             yield return null;
+        }
 
         if (task.IsFaulted)
         {
-            Error = task.Exception?.InnerException?.Message ?? "Connection failed";
+            Error = task.Exception?.InnerException?.Message
+                 ?? task.Exception?.Message
+                 ?? "Connection failed (faulted)";
+            yield break;
+        }
+
+        if (task.IsCanceled)
+        {
+            Error = "Connection canceled";
+            yield break;
+        }
+
+        if (_cws.State != WebSocketState.Open)
+        {
+            Error = $"Socket not open after connect (state={_cws.State})";
             yield break;
         }
 

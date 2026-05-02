@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 
 public class Bot : MonoBehaviour
@@ -14,6 +15,9 @@ public class Bot : MonoBehaviour
     [SerializeField] private float minTravelDistance = 5f;
     [SerializeField] private int destinationCandidateCount = 6;
 
+    [Header("Respawn")]
+    [SerializeField] private float respawnDelay = 20f;
+
     [Header("Collision Reaction")]
     [SerializeField] private float collisionRedirectDistance = 3f;
     [SerializeField] private Vector2 collisionPauseRange = new Vector2(0.15f, 0.45f);
@@ -29,6 +33,8 @@ public class Bot : MonoBehaviour
     private float stateTimer;
     private float currentThrottle;
     private float targetThrottle;
+    private Vector3 pauseHoldPosition;
+    private Rigidbody cachedRigidbody;
 
     // Hit reaction
     private bool isHitReacting;
@@ -41,6 +47,14 @@ public class Bot : MonoBehaviour
     private Animator animator;
     private static readonly int IsMovingHash = Animator.StringToHash("IsMoving");
     private static readonly int HitHash = Animator.StringToHash("Hit");
+    private static readonly int DieHash = Animator.StringToHash("Die");
+
+    private bool isDead;
+    public bool IsDead => isDead;
+
+    // Captured at death so the corpse stays anchored where it fell.
+    private Vector3 deathWorldPosition;
+    private bool hasDeathPose;
 
     public void Initialize(float moveSpeed)
     {
@@ -48,15 +62,16 @@ public class Bot : MonoBehaviour
         lockedY = transform.position.y;
 
         animator = GetComponentInChildren<Animator>();
+        if (animator != null) animator.applyRootMotion = false;
 
         // Prevent gravity/collision forces from nudging the bot off the play plane.
-        Rigidbody rb = GetComponent<Rigidbody>();
-        if (rb != null)
+        cachedRigidbody = GetComponent<Rigidbody>();
+        if (cachedRigidbody != null)
         {
-            rb.useGravity = false;
-            rb.linearVelocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
-            rb.constraints = RigidbodyConstraints.FreezePositionY
+            cachedRigidbody.useGravity = false;
+            cachedRigidbody.linearVelocity = Vector3.zero;
+            cachedRigidbody.angularVelocity = Vector3.zero;
+            cachedRigidbody.constraints = RigidbodyConstraints.FreezePositionY
                            | RigidbodyConstraints.FreezeRotationX
                            | RigidbodyConstraints.FreezeRotationZ;
         }
@@ -82,8 +97,89 @@ public class Bot : MonoBehaviour
         if (animator != null) animator.SetTrigger(HitHash);
     }
 
+    /// <summary>
+    /// Kills the bot: plays the Die animation and disables collisions/logic
+    /// so it no longer interacts with the scene. The corpse stays visible.
+    /// </summary>
+    public void Die(Vector3 attackerPosition)
+    {
+        if (isDead) return;
+        isDead = true;
+
+        // Anchor world position so root motion can't drift the corpse, but
+        // leave rotation and the animator transform alone so the Die clip
+        // (which rotates the character) is visible.
+        deathWorldPosition = transform.position;
+        hasDeathPose = true;
+        if (animator != null)
+        {
+            animator.applyRootMotion = false;
+            // The controller only has a Hit -> Die transition, so SetTrigger
+            // doesn't fire from Idle/Walk. Force the Die state directly.
+            animator.Play("Die", 0, 0f);
+        }
+
+        foreach (Collider c in GetComponentsInChildren<Collider>())
+            c.enabled = false;
+
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.isKinematic = true;
+        }
+
+        isHitReacting = false;
+        isMoving = false;
+        currentThrottle = 0f;
+        targetThrottle = 0f;
+
+        StartCoroutine(RespawnAfterDelay());
+    }
+
+    private IEnumerator RespawnAfterDelay()
+    {
+        yield return new WaitForSeconds(respawnDelay);
+        if (!isDead) yield break; // already revived somehow
+
+        if (animator != null)
+            animator.Play("Birth", 0, 0f);
+
+        // Wait one frame so the Animator switches into Birth, then read its length.
+        yield return null;
+        float birthDuration = animator != null
+            ? animator.GetCurrentAnimatorStateInfo(0).length
+            : 0.5f;
+        yield return new WaitForSeconds(birthDuration);
+
+        // Birth finished — restore physics, end the dead state, resume wandering.
+        foreach (Collider c in GetComponentsInChildren<Collider>())
+            c.enabled = true;
+
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb != null) rb.isKinematic = false;
+
+        isDead = false;
+        hasDeathPose = false;
+
+        if (animator != null) animator.Play("Idle", 0, 0f);
+
+        destination = GetRandomPointOnScreen(lockedY);
+        FaceDestination();
+        EnterMovingState();
+    }
+
+    private void LateUpdate()
+    {
+        if (!isDead || !hasDeathPose) return;
+        transform.position = deathWorldPosition;
+    }
+
     private void Update()
     {
+        if (isDead) return;
+
         // Hit reaction: slide away briefly
         if (isHitReacting)
         {
@@ -93,7 +189,12 @@ public class Bot : MonoBehaviour
             reactPos.y = lockedY;
             transform.position = ScreenBoundsUtility.ClampToVisibleWorld(reactPos);
             if (hitReactTimer <= 0f)
+            {
                 isHitReacting = false;
+                // If we were paused when hit, refresh the held position so the
+                // pause-pin doesn't yank us back to the pre-hit spot next frame.
+                if (!isMoving) pauseHoldPosition = transform.position;
+            }
             if (animator != null) animator.SetBool(IsMovingHash, false);
             return;
         }
@@ -124,6 +225,19 @@ public class Bot : MonoBehaviour
             {
                 EnterMovingState();
             }
+        }
+
+        // While paused, hold position absolutely — no drift from animator root motion or stray physics.
+        if (!isMoving && currentThrottle <= 0f)
+        {
+            if (cachedRigidbody != null)
+            {
+                cachedRigidbody.linearVelocity = Vector3.zero;
+                cachedRigidbody.angularVelocity = Vector3.zero;
+            }
+            transform.position = pauseHoldPosition;
+            if (animator != null) animator.SetBool(IsMovingHash, false);
+            return;
         }
 
         // Smoothly ramp throttle toward target so motion eases in/out like a joystick push.
@@ -162,11 +276,13 @@ public class Bot : MonoBehaviour
 
     private void OnCollisionEnter(Collision collision)
     {
+        if (isDead) return;
         RedirectAwayFrom(collision.transform.position);
     }
 
     private void OnCollisionStay(Collision collision)
     {
+        if (isDead) return;
         if (collisionCooldownTimer <= 0f)
             RedirectAwayFrom(collision.transform.position);
     }
@@ -199,6 +315,13 @@ public class Bot : MonoBehaviour
         isMoving = false;
         stateTimer = Random.Range(collisionPauseRange.x, collisionPauseRange.y);
         targetThrottle = 0f;
+        currentThrottle = 0f;
+        pauseHoldPosition = transform.position;
+        if (cachedRigidbody != null)
+        {
+            cachedRigidbody.linearVelocity = Vector3.zero;
+            cachedRigidbody.angularVelocity = Vector3.zero;
+        }
     }
 
     private void EnterMovingState()
@@ -213,6 +336,13 @@ public class Bot : MonoBehaviour
         isMoving = false;
         stateTimer = Random.Range(pauseDurationRange.x, pauseDurationRange.y);
         targetThrottle = 0f;
+        currentThrottle = 0f;
+        pauseHoldPosition = transform.position;
+        if (cachedRigidbody != null)
+        {
+            cachedRigidbody.linearVelocity = Vector3.zero;
+            cachedRigidbody.angularVelocity = Vector3.zero;
+        }
     }
 
     /// <summary>

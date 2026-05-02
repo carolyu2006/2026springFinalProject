@@ -4,6 +4,12 @@ using System.Linq;
 
 public class SetupBuildSettings
 {
+    [MenuItem("Tools/Setup Build Settings")]
+    public static void Run()
+    {
+        UnityEngine.Debug.Log(Execute());
+    }
+
     public static string Execute()
     {
         // Desired scene order — ControlSelectScene first
@@ -12,8 +18,10 @@ public class SetupBuildSettings
             "Assets/Scenes/ControlSelectScene.unity",
             "Assets/Scenes/StartScene.unity",
             "Assets/Scenes/InstructionScene.unity",
-            "Assets/Scenes/Cartoon.unity",
+            "Assets/Scenes/EnglishInstructionScene.unity",
+            "Assets/Scenes/GameScene.unity",
             "Assets/Scenes/EndScene.unity",
+            "Assets/Scenes/EnglishEndScene.unity",
             "Assets/Scenes/Scene1.unity"
         };
 

@@ -7,12 +7,11 @@ public class GameManager : MonoBehaviour
 
     [Header("Game Settings")]
     [SerializeField] private string endSceneName = "EndScene";
-
-    // Which player is currently carrying the orange (null = nobody)
-    public Player Carrier { get; private set; }
+    [SerializeField] private string englishEndSceneName = "EnglishEndScene";
 
     // The winner when game ends
     public static int WinnerPlayerIndex = -1; // -1 = draw
+    public static int[] FinalOrangeCounts = new int[0];
 
     private Player[] players;
     private bool gameOver;
@@ -38,52 +37,38 @@ public class GameManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Called when a player picks up the orange.
-    /// </summary>
-    public void SetCarrier(Player player)
-    {
-        Carrier = player;
-    }
-
-    /// <summary>
-    /// Called when the carrier drops the orange (e.g. got punched).
-    /// </summary>
-    public void ClearCarrier()
-    {
-        Carrier = null;
-    }
-
-    /// <summary>
-    /// Instant win: carrier punched the other player out of the crowd.
-    /// </summary>
-    public void InstantWin(Player winner)
-    {
-        if (gameOver) return;
-        gameOver = true;
-
-        WinnerPlayerIndex = winner.PlayerIndex;
-        SceneManager.LoadScene(endSceneName);
-    }
-
-    /// <summary>
     /// Called by CircularCountdown when time runs out.
-    /// The carrier wins; if no carrier, it's a draw.
+    /// Whoever has the most oranges wins; tie = draw.
     /// </summary>
     public void OnTimeUp()
     {
         if (gameOver) return;
         gameOver = true;
 
-        if (Carrier != null)
+        WinnerPlayerIndex = -1;
+        if (players != null && players.Length > 0)
         {
-            WinnerPlayerIndex = Carrier.PlayerIndex;
-        }
-        else
-        {
-            WinnerPlayerIndex = -1;
+            FinalOrangeCounts = new int[players.Length];
+            int bestCount = -1;
+            int bestIndex = -1;
+            bool tied = false;
+            for (int i = 0; i < players.Length; i++)
+            {
+                int count = players[i] != null ? players[i].OrangeCount : 0;
+                FinalOrangeCounts[i] = count;
+                if (count > bestCount) { bestCount = count; bestIndex = players[i].PlayerIndex; tied = false; }
+                else if (count == bestCount) { tied = true; }
+            }
+            WinnerPlayerIndex = (bestCount > 0 && !tied) ? bestIndex : -1;
         }
 
-        SceneManager.LoadScene(endSceneName);
+        SceneManager.LoadScene(ResolveEndSceneName());
+    }
+
+    private string ResolveEndSceneName()
+    {
+        bool english = GameConfig.Instance != null && GameConfig.Instance.Language == GameLanguage.English;
+        return english && !string.IsNullOrEmpty(englishEndSceneName) ? englishEndSceneName : endSceneName;
     }
 
     public bool IsGameOver()

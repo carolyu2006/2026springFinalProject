@@ -20,7 +20,7 @@ public class Player : MonoBehaviour
 
     [Header("Combat")]
     [SerializeField] private float punchRange = 1.5f;
-    [SerializeField] private float punchCooldown = 0.5f;
+    [SerializeField] private float punchCooldown = 3f;
     [SerializeField] private float stunDuration = 1.5f;
     [SerializeField] private float knockbackForce = 8f;
     [SerializeField] private float punchWindup = 0.08f;
@@ -33,8 +33,12 @@ public class Player : MonoBehaviour
     private float stunTimer;
     private float punchTimer;
     private bool isPunching;
-    private bool hasOrange;
+    private int orangeCount;
     private Vector3 knockbackVelocity;
+
+    // Locked while playing the "Steal" reaction after losing an orange to a punch.
+    private bool isStolenReacting;
+    private float stolenReactionTimer;
 
     // Cached body for punch animation
     private Transform bodyTransform;
@@ -45,13 +49,25 @@ public class Player : MonoBehaviour
     private static readonly int IsMovingHash = Animator.StringToHash("IsMoving");
     private static readonly int HitHash = Animator.StringToHash("Hit");
 
+    // Lazily-loaded shared punch SFX so runtime-added Players (e.g. the
+    // InstructionScene demo) get sound without inspector setup.
+    private static AudioClip hitSfxClip;
+    [SerializeField, Range(0f, 1f)] private float hitSfxVolume = 1f;
+    private AudioSource sfxSource;
+
     // Keyboard punch keys
     private KeyCode punchKey;
     private bool prevPunchPressed;
 
     public int PlayerIndex => playerIndex;
-    public bool HasOrange => hasOrange;
+    public int OrangeCount => orangeCount;
+    public bool HasOrange => orangeCount > 0;
     public bool IsStunned => isStunned;
+    // The position this Player wanted at the end of Update. The
+    // InstructionScene's character.prefab has an Animator on the root that
+    // would otherwise revert our writes every frame, so the scene manager
+    // re-applies this in LateUpdate.
+    public Vector3 IntendedPosition { get; private set; }
 
     public void Initialize(int index, ControlScheme newControlScheme, float newMoveSpeed)
     {
@@ -59,6 +75,7 @@ public class Player : MonoBehaviour
         controlScheme = newControlScheme;
         moveSpeed = newMoveSpeed;
         punchKey = controlScheme == ControlScheme.WASD ? KeyCode.R : KeyCode.Slash;
+        IntendedPosition = transform.position;
     }
 
     private void Start()
@@ -74,11 +91,25 @@ public class Player : MonoBehaviour
         }
 
         animator = GetComponentInChildren<Animator>();
+        IntendedPosition = transform.position;
     }
 
     private void Update()
     {
         if (GameManager.Instance != null && GameManager.Instance.IsGameOver()) return;
+
+        // Locked out while the Steal reaction plays — no movement, no punching.
+        if (isStolenReacting)
+        {
+            stolenReactionTimer -= Time.deltaTime;
+            if (stolenReactionTimer <= 0f)
+            {
+                isStolenReacting = false;
+                if (animator != null) animator.Play("Idle", 0, 0f);
+            }
+            if (animator != null) animator.SetBool(IsMovingHash, false);
+            return;
+        }
 
         // Handle stun
         if (isStunned)
@@ -87,6 +118,7 @@ public class Player : MonoBehaviour
             knockbackVelocity = Vector3.Lerp(knockbackVelocity, Vector3.zero, 5f * Time.deltaTime);
             Vector3 knockDelta = knockbackVelocity * Time.deltaTime;
             transform.position = MoveWithCollision(transform.position, new Vector3(knockDelta.x, 0f, knockDelta.z));
+            IntendedPosition = transform.position;
 
             if (stunTimer <= 0f)
             {
@@ -101,6 +133,7 @@ public class Player : MonoBehaviour
         Vector2 input = ReadMovementInput();
         Vector3 move = new Vector3(input.x, 0f, input.y) * (moveSpeed * Time.deltaTime);
         transform.position = MoveWithCollision(transform.position, move);
+        IntendedPosition = transform.position;
 
         if (animator != null) animator.SetBool(IsMovingHash, input.sqrMagnitude > 0.01f);
 
@@ -125,39 +158,94 @@ public class Player : MonoBehaviour
 
     private void GrabOrange(Orange orange)
     {
-        hasOrange = true;
+        SetOrangeCount(orangeCount + 1);
         orange.PickUp(transform);
-        GameManager.Instance.SetCarrier(this);
     }
 
     public void DropOrange()
     {
-        if (!hasOrange) return;
+        if (orangeCount <= 0) return;
         Orange orange = GetComponentInChildren<Orange>();
         if (orange != null)
             orange.Drop();
-        hasOrange = false;
-        GameManager.Instance.ClearCarrier();
+        SetOrangeCount(orangeCount - 1);
+    }
+
+    private void SetOrangeCount(int newCount)
+    {
+        if (newCount < 0) newCount = 0;
+        if (newCount == orangeCount) return;
+        orangeCount = newCount;
+        BroadcastOrangeCount();
+    }
+
+    private void BroadcastOrangeCount()
+    {
+        // playerIndex is 0-based in Unity but 1-based on the worker / phones.
+        int wirePlayerId = playerIndex + 1;
+        string json = "{\"type\":\"orange_count\",\"playerId\":" + wirePlayerId
+                    + ",\"count\":" + orangeCount + "}";
+        if (WebSocketClient.Instance != null)
+            WebSocketClient.Instance.Send(json);
     }
 
     /// <summary>
-    /// Detaches the orange from this carrier without returning it to the scene.
-    /// Used when another player steals it.
+    /// Detaches one orange from this player without returning it to the scene.
+    /// Used when another player steals via a punch. Plays the Steal reaction
+    /// on the victim and locks them out of moving/punching for the clip.
     /// </summary>
     private Orange TakeOrangeAway()
     {
-        if (!hasOrange) return null;
+        if (orangeCount <= 0) return null;
         Orange orange = GetComponentInChildren<Orange>();
-        hasOrange = false;
-        if (GameManager.Instance != null) GameManager.Instance.ClearCarrier();
+        if (orange == null) return null;
+        SetOrangeCount(orangeCount - 1);
+        PlayStolenReaction();
         return orange;
+    }
+
+    public void PlayStolenReaction()
+    {
+        isStolenReacting = true;
+        stolenReactionTimer = 0.6f; // safe default; overridden once the clip starts
+        if (animator != null)
+        {
+            animator.Play("Steal", 0, 0f);
+            StartCoroutine(SyncStolenLockToClip());
+        }
+    }
+
+    private IEnumerator SyncStolenLockToClip()
+    {
+        yield return null; // let the Animator switch into the Steal state
+        if (animator != null && isStolenReacting)
+        {
+            float length = animator.GetCurrentAnimatorStateInfo(0).length;
+            if (length > 0f) stolenReactionTimer = length;
+        }
     }
 
     private void Punch()
     {
         punchTimer = punchCooldown;
+        if (animator != null) animator.SetTrigger(HitHash);
+        PlayHitSfx();
         if (!isPunching)
             StartCoroutine(PunchRoutine());
+    }
+
+    private void PlayHitSfx()
+    {
+        if (hitSfxClip == null)
+            hitSfxClip = Resources.Load<AudioClip>("SFX/hit");
+        if (hitSfxClip == null) return;
+        if (sfxSource == null)
+        {
+            sfxSource = gameObject.AddComponent<AudioSource>();
+            sfxSource.playOnAwake = false;
+            sfxSource.spatialBlend = 0f; // 2D — always full volume regardless of listener position
+        }
+        sfxSource.PlayOneShot(hitSfxClip, hitSfxVolume);
     }
 
     private IEnumerator PunchRoutine()
@@ -215,6 +303,10 @@ public class Player : MonoBehaviour
 
     private void ResolvePunchHit()
     {
+        // Only one player can be stunned per exchange: if our own punch is
+        // already mid-strike when the opponent's hit lands on us, ours fizzles.
+        if (isStolenReacting || isStunned) return;
+
         Vector3 center = transform.position + transform.forward * punchRange;
         Collider[] hits = Physics.OverlapSphere(center, punchRange * 0.8f);
 
@@ -226,43 +318,36 @@ public class Player : MonoBehaviour
             Player otherPlayer = hit.GetComponentInParent<Player>();
             if (otherPlayer != null && otherPlayer != this)
             {
-                if (hasOrange)
-                {
-                    // Carrier punches the other player = instant win
-                    GameManager.Instance.InstantWin(this);
-                    return;
-                }
                 if (otherPlayer.HasOrange)
                 {
-                    // Steal the orange directly from the victim
+                    // TakeOrangeAway already triggers the Steal reaction.
                     Orange stolen = otherPlayer.TakeOrangeAway();
                     if (stolen != null)
                     {
-                        hasOrange = true;
+                        SetOrangeCount(orangeCount + 1);
                         stolen.PickUp(transform);
-                        GameManager.Instance.SetCarrier(this);
                     }
-                    return;
                 }
-                // Neither has orange — no effect for now
+                else
+                {
+                    // Nothing to steal, but still lock the victim into the reaction.
+                    otherPlayer.PlayStolenReaction();
+                }
                 return;
             }
 
             Bot bot = hit.GetComponentInParent<Bot>();
             if (bot != null)
             {
-                Destroy(bot.gameObject);
+                if (!bot.IsDead) bot.Die(transform.position);
                 return;
             }
 
-            if (!hasOrange && (GameManager.Instance == null || GameManager.Instance.Carrier == null))
+            Orange ground = hit.GetComponent<Orange>();
+            if (ground != null && !ground.IsHeld)
             {
-                Orange orange = hit.GetComponent<Orange>();
-                if (orange != null && !orange.IsHeld)
-                {
-                    GrabOrange(orange);
-                    return;
-                }
+                GrabOrange(ground);
+                return;
             }
         }
     }
@@ -270,6 +355,14 @@ public class Player : MonoBehaviour
     // Slide-along-wall movement: tries full delta, then X-only, then Z-only.
     private Vector3 MoveWithCollision(Vector3 current, Vector3 delta)
     {
+        // Walls in the instruction scenes are rotated on Y, so the axis-aligned
+        // slide tests below can leave the player slightly inside one. Without
+        // this push-out, every slide candidate stays overlapping and the
+        // player gets permanently stuck against the wall.
+        Vector3 pushOut = ComputeWallPushOut(current);
+        if (pushOut.sqrMagnitude > 0f)
+            current = ScreenBoundsUtility.ClampToVisibleWorld(current + pushOut);
+
         Vector3 full = ScreenBoundsUtility.ClampToVisibleWorld(current + delta);
         if (CanOccupy(full)) return full;
 
@@ -280,6 +373,59 @@ public class Player : MonoBehaviour
         if (CanOccupy(zOnly)) return zOnly;
 
         return current;
+    }
+
+    // Computes a world-space offset that pushes `pos` out of every wall whose
+    // OBB overlaps the probe. Uses the wall's world axes and the probe's
+    // projected radius along each, so it works for rotated walls where the
+    // probe center sits outside but the probe corners poke in.
+    private Vector3 ComputeWallPushOut(Vector3 pos)
+    {
+        Vector3 halfExtents = new Vector3(0.45f, 0.45f, 0.45f);
+        Collider[] hits = Physics.OverlapBox(pos, halfExtents, transform.rotation);
+        Vector3 push = Vector3.zero;
+        foreach (Collider hit in hits)
+        {
+            if (hit == null || hit.isTrigger) continue;
+            if (hit.transform.IsChildOf(transform)) continue;
+            if (hit.GetComponentInParent<Player>() != null) continue;
+            if (hit.GetComponentInParent<Bot>() != null) continue;
+
+            BoxCollider box = hit as BoxCollider;
+            if (box == null) continue;
+
+            Transform wt = box.transform;
+            Vector3 wallCenter = wt.TransformPoint(box.center);
+            Vector3 wallRight = wt.right;
+            Vector3 wallForward = wt.forward;
+            Vector3 lossy = wt.lossyScale;
+            float wallHalfX = box.size.x * 0.5f * Mathf.Abs(lossy.x);
+            float wallHalfZ = box.size.z * 0.5f * Mathf.Abs(lossy.z);
+
+            Vector3 pr = transform.right;
+            Vector3 pu = transform.up;
+            Vector3 pf = transform.forward;
+            float probeRadX = halfExtents.x * Mathf.Abs(Vector3.Dot(pr, wallRight))
+                            + halfExtents.y * Mathf.Abs(Vector3.Dot(pu, wallRight))
+                            + halfExtents.z * Mathf.Abs(Vector3.Dot(pf, wallRight));
+            float probeRadZ = halfExtents.x * Mathf.Abs(Vector3.Dot(pr, wallForward))
+                            + halfExtents.y * Mathf.Abs(Vector3.Dot(pu, wallForward))
+                            + halfExtents.z * Mathf.Abs(Vector3.Dot(pf, wallForward));
+
+            Vector3 d = pos - wallCenter;
+            float distX = Vector3.Dot(d, wallRight);
+            float distZ = Vector3.Dot(d, wallForward);
+            float penX = (wallHalfX + probeRadX) - Mathf.Abs(distX);
+            float penZ = (wallHalfZ + probeRadZ) - Mathf.Abs(distZ);
+            if (penX <= 0f || penZ <= 0f) continue;
+
+            Vector3 worldPush = (penX < penZ)
+                ? wallRight * ((penX + 0.01f) * Mathf.Sign(distX))
+                : wallForward * ((penZ + 0.01f) * Mathf.Sign(distZ));
+            worldPush.y = 0f;
+            push += worldPush;
+        }
+        return push;
     }
 
     private bool CanOccupy(Vector3 pos)

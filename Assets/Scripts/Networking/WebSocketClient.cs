@@ -28,7 +28,7 @@ public class WebSocketClient : MonoBehaviour
 
     public void Connect(string roomCode, string serverBase)
     {
-        _serverUrl = $"{serverBase}/ineedvitc/room/{roomCode}?role=display";
+        _serverUrl = $"{serverBase}/gowiththecrowd/room/{roomCode}?role=display";
         _shouldReconnect = true;
         StartCoroutine(ConnectRoutine());
     }
@@ -51,14 +51,17 @@ public class WebSocketClient : MonoBehaviour
         }
 
         _connected = true;
-        Debug.Log("[WS] Connected");
+        Debug.Log($"[WS] Connected to {_serverUrl}");
         OnConnected?.Invoke();
 
         while (_connected && _ws.Error == null)
         {
-            string msg = _ws.Recv();
-            if (msg != null)
+            string msg;
+            while ((msg = _ws.Recv()) != null)
+            {
+                Debug.Log($"[WS] Recv: {msg}");
                 OnMessageReceived?.Invoke(msg);
+            }
             yield return null;
         }
 

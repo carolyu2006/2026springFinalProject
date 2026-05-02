@@ -31,35 +31,37 @@ public class JoystickNetworkManager : MonoBehaviour
         public string name;
     }
 
-    // Tried in order until one /room/create call succeeds.
-    // In the Editor we hit the local wrangler dev server first; built clients
-    // prefer the deployed worker.
-    private static readonly string[] DefaultServerBases =
-#if UNITY_EDITOR
-    {
-        "ws://localhost:8787",
-        "wss://orango.game",
-        "wss://orango.ing",
-    };
-#else
-    {
-        "wss://orango.game",
-        "wss://orango.ing",
-        "ws://localhost:8787",
-    };
-#endif
+    public enum BackendTarget { Production, Localhost, Custom }
+
+    [Header("Backend")]
+    [Tooltip("Which backend to create the room on. Phones must be able to reach the same URL.")]
+    [SerializeField] private BackendTarget backend = BackendTarget.Production;
+
+    [Tooltip("Used when Backend = Custom. For a real phone on Wi-Fi use your laptop's LAN IP, e.g. ws://192.168.1.42:7001")]
+    [SerializeField] private string customServerBase = "ws://192.168.1.42:7001";
+
+    private const string ProductionServerBase = "wss://orango.ing";
+    private const string LocalhostServerBase  = "ws://localhost:7001";
+
+    private bool subscribed;
 
     private void Awake()
     {
         if (Instance != null) { Destroy(gameObject); return; }
         Instance = this;
         DontDestroyOnLoad(gameObject);
+        TrySubscribe();
     }
 
-    private void Start()
+    private void Start() => TrySubscribe();
+
+    private void TrySubscribe()
     {
-        if (WebSocketClient.Instance != null)
-            WebSocketClient.Instance.OnMessageReceived += HandleMessage;
+        if (subscribed) return;
+        if (WebSocketClient.Instance == null) return;
+        WebSocketClient.Instance.OnMessageReceived += HandleMessage;
+        subscribed = true;
+        Debug.Log("[Joystick] Subscribed to WebSocketClient.OnMessageReceived");
     }
 
     /// <summary>
@@ -71,17 +73,28 @@ public class JoystickNetworkManager : MonoBehaviour
         StartCoroutine(CreateRoomRoutine());
     }
 
+    private string ResolveServerBase()
+    {
+        // GameConfig.ServerBase, if set programmatically, still wins.
+        string pinned = GameConfig.Instance?.ServerBase;
+        if (!string.IsNullOrEmpty(pinned)) return pinned;
+
+        switch (backend)
+        {
+            case BackendTarget.Localhost: return LocalhostServerBase;
+            case BackendTarget.Custom:    return customServerBase;
+            default:                      return ProductionServerBase;
+        }
+    }
+
     private IEnumerator CreateRoomRoutine()
     {
-        string pinned = GameConfig.Instance?.ServerBase;
-        string[] candidates = string.IsNullOrEmpty(pinned)
-            ? DefaultServerBases
-            : new[] { pinned };
+        string[] candidates = { ResolveServerBase() };
 
         foreach (string serverBase in candidates)
         {
             string httpBase = serverBase.Replace("ws://", "http://").Replace("wss://", "https://");
-            string url      = $"{httpBase}/ineedvitc/room/create";
+            string url      = $"{httpBase}/gowiththecrowd/room/create";
 
             Debug.Log($"[Joystick] Trying {url}");
             var req = UnityWebRequest.Get(url);
@@ -109,6 +122,9 @@ public class JoystickNetworkManager : MonoBehaviour
             }
 
             Debug.Log($"[Joystick] Connected to {serverBase}, room {code}");
+            // Make sure we're subscribed before the display socket opens —
+            // otherwise an early roster-replay message would be dropped.
+            TrySubscribe();
             // Start the display WebSocket FIRST so the server is ready to fan
             // out player_connected to us before any phone scans the code.
             WebSocketClient.Instance.Connect(code, serverBase);
@@ -122,7 +138,11 @@ public class JoystickNetworkManager : MonoBehaviour
     private void HandleMessage(string json)
     {
         var msg = JsonUtility.FromJson<InboundMsg>(json);
-        if (msg == null) return;
+        if (msg == null)
+        {
+            Debug.LogWarning($"[Joystick] Failed to parse: {json}");
+            return;
+        }
 
         switch (msg.type)
         {

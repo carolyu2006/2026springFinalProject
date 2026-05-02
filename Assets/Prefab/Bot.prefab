@@ -56,6 +56,7 @@ MonoBehaviour:
   hitReactForce: 4
   minTravelDistance: 5
   destinationCandidateCount: 6
+  respawnDelay: 20
   collisionRedirectDistance: 3
   collisionPauseRange: {x: 0.15, y: 0.45}
   collisionTurnJitterDegrees: 45
@@ -80,7 +81,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 1.4, y: 3, z: 1.4}
+  m_Size: {x: 2, y: 3, z: 2.1}
   m_Center: {x: 0, y: 1, z: 0}
 --- !u!54 &5275959712727031619
 Rigidbody:
@@ -120,6 +121,18 @@ PrefabInstance:
     - target: {fileID: 321702769536928070, guid: 40a75be231540456387b8087976f0429, type: 3}
       propertyPath: m_Name
       value: character
+      objectReference: {fileID: 0}
+    - target: {fileID: 1098098044503741436, guid: 40a75be231540456387b8087976f0429, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 0.4
+      objectReference: {fileID: 0}
+    - target: {fileID: 1098098044503741436, guid: 40a75be231540456387b8087976f0429, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 0.4
+      objectReference: {fileID: 0}
+    - target: {fileID: 1098098044503741436, guid: 40a75be231540456387b8087976f0429, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 0.4
       objectReference: {fileID: 0}
     - target: {fileID: 1098098044503741436, guid: 40a75be231540456387b8087976f0429, type: 3}
       propertyPath: m_LocalPosition.x

@@ -13,13 +13,19 @@ EditorBuildSettings:
     guid: 4d5e6f7a8b9c50124d5e6f7a8b9c5012
   - enabled: 1
     path: Assets/Scenes/InstructionScene.unity
-    guid: 5e6f7a8b9c0d51235e6f7a8b9c0d5123
+    guid: a20198685d54f471abadbf8782ced82d
   - enabled: 1
-    path: Assets/Scenes/Cartoon.unity
+    path: Assets/Scenes/EnglishInstructionScene.unity
+    guid: 1458910d9229f41dab5182bac85b9ebc
+  - enabled: 1
+    path: Assets/Scenes/GameScene.unity
     guid: db5ea89ac203f48ce88a8f7b67799d3b
   - enabled: 1
     path: Assets/Scenes/EndScene.unity
     guid: 6f7a8b9c0d1e52346f7a8b9c0d1e5234
+  - enabled: 1
+    path: Assets/Scenes/EnglishEndScene.unity
+    guid: 390413c75fdc43339dcd98016bf46d00
   - enabled: 1
     path: Assets/Scenes/Scene1.unity
     guid: 99c9720ab356a0642a771bea13969a05

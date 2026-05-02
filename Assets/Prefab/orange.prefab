@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 8329487565316345893}
   - component: {fileID: 6242756708768743344}
   - component: {fileID: 7212295125555793930}
+  - component: {fileID: 1093847562039182746}
   m_Layer: 0
   m_Name: orange
   m_TagString: Untagged
@@ -29,7 +30,7 @@ Transform:
   m_GameObject: {fileID: 8813934372806787717}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0.3067752, z: 0, w: 0.95178205}
-  m_LocalPosition: {x: -3.55, y: 1.25, z: -11}
+  m_LocalPosition: {x: -3.55, y: 1.57, z: -11}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -118,6 +119,27 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 2.4, y: 2.2, z: 2.4}
   m_Center: {x: 0, y: 0.3, z: 0}
+--- !u!135 &1093847562039182746
+SphereCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8813934372806787717}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 1.3
+  m_Center: {x: 0, y: 0, z: 0}
 --- !u!1001 &6103657477520723171
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -128,15 +150,15 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: -8679921383154817045, guid: 4a3452a0515b44a389e1d99055ca7161, type: 3}
       propertyPath: m_LocalScale.x
-      value: 1.2
+      value: 1.3
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 4a3452a0515b44a389e1d99055ca7161, type: 3}
       propertyPath: m_LocalScale.y
-      value: 1.2
+      value: 1.3
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 4a3452a0515b44a389e1d99055ca7161, type: 3}
       propertyPath: m_LocalScale.z
-      value: 1.2
+      value: 1.3
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 4a3452a0515b44a389e1d99055ca7161, type: 3}
       propertyPath: m_LocalPosition.x
@@ -144,7 +166,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 4a3452a0515b44a389e1d99055ca7161, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.4
+      value: 0.55
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 4a3452a0515b44a389e1d99055ca7161, type: 3}
       propertyPath: m_LocalPosition.z

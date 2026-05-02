@@ -7,6 +7,8 @@ public class CircularCountdown : MonoBehaviour
     public Image fillImage;
     public AudioSource bgmSource;
     public string endSceneName = "EndScene";
+    [Tooltip("Seconds to end the round before the BGM clip finishes.")]
+    public float endBeforeMusicEnd = 2f;
 
     private float totalTime;
     private float currentTime;
@@ -16,7 +18,7 @@ public class CircularCountdown : MonoBehaviour
     {
         if (bgmSource != null && bgmSource.clip != null)
         {
-            totalTime = bgmSource.clip.length;
+            totalTime = Mathf.Max(0.1f, bgmSource.clip.length - endBeforeMusicEnd);
             currentTime = totalTime;
             bgmSource.Play();
         }

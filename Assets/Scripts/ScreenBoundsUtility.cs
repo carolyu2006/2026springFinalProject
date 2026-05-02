@@ -4,11 +4,15 @@ public class ScreenBoundsUtility : MonoBehaviour
 {
     public static ScreenBoundsUtility Instance { get; private set; }
 
-    [Header("Play Area Corners (X = world X, Y = world Z)")]
-    [SerializeField] private Vector2 bottomLeft = new Vector2(-10f, -6f);
-    [SerializeField] private Vector2 bottomRight = new Vector2(10f, -6f);
-    [SerializeField] private Vector2 topLeft = new Vector2(-10f, 6f);
-    [SerializeField] private Vector2 topRight = new Vector2(10f, 6f);
+    [Header("Play Area Vertices (X = world X, Y = world Z), ordered around the polygon")]
+    [SerializeField] private Vector2[] vertices = new Vector2[]
+    {
+        new Vector2(-19.8f, -12.92f),
+        new Vector2(19.31f, -11.16f),
+        new Vector2(17f, 14.1f),
+        new Vector2(0f, 18f),
+        new Vector2(-20f, 15.6f),
+    };
 
     private void Awake()
     {
@@ -16,82 +20,83 @@ public class ScreenBoundsUtility : MonoBehaviour
     }
 
     /// <summary>
-    /// Clamp a position inside the quadrilateral defined by the 4 corners.
+    /// Clamp a position inside the polygon defined by <see cref="vertices"/>.
     /// </summary>
     public static Vector3 ClampToVisibleWorld(Vector3 position)
     {
-        if (Instance == null) return position;
-
-        Vector2 p = new Vector2(position.x, position.z);
-        Vector2 bl = Instance.bottomLeft;
-        Vector2 br = Instance.bottomRight;
-        Vector2 tl = Instance.topLeft;
-        Vector2 tr = Instance.topRight;
-
-        if (IsInsideQuad(p, bl, br, tr, tl))
+        if (Instance == null || Instance.vertices == null || Instance.vertices.Length < 3)
             return position;
 
-        // Find closest point on the quad edges
-        Vector2 closest = ClosestPointOnQuadEdges(p, bl, br, tr, tl);
+        Vector2[] v = Instance.vertices;
+        Vector2 p = new Vector2(position.x, position.z);
+
+        if (IsInsidePolygon(p, v))
+            return position;
+
+        Vector2 closest = ClosestPointOnPolygonEdges(p, v);
         position.x = closest.x;
         position.z = closest.y;
         return position;
     }
 
     /// <summary>
-    /// Random point inside the quadrilateral using bilinear interpolation.
+    /// Random point inside the polygon, using rejection sampling on its axis-aligned bounding box.
     /// </summary>
     public static Vector3 GetRandomPointInsideVisibleWorld(float worldY)
     {
-        if (Instance == null) return new Vector3(0f, worldY, 0f);
+        if (Instance == null || Instance.vertices == null || Instance.vertices.Length < 3)
+            return new Vector3(0f, worldY, 0f);
 
-        Vector2 bl = Instance.bottomLeft;
-        Vector2 br = Instance.bottomRight;
-        Vector2 tl = Instance.topLeft;
-        Vector2 tr = Instance.topRight;
+        Vector2[] v = Instance.vertices;
 
-        // Bilinear interpolation across the quad
-        float u = Random.Range(0f, 1f);
-        float v = Random.Range(0f, 1f);
+        float minX = v[0].x, maxX = v[0].x, minY = v[0].y, maxY = v[0].y;
+        for (int i = 1; i < v.Length; i++)
+        {
+            if (v[i].x < minX) minX = v[i].x;
+            if (v[i].x > maxX) maxX = v[i].x;
+            if (v[i].y < minY) minY = v[i].y;
+            if (v[i].y > maxY) maxY = v[i].y;
+        }
 
-        Vector2 bottom = Vector2.Lerp(bl, br, u);
-        Vector2 top = Vector2.Lerp(tl, tr, u);
-        Vector2 point = Vector2.Lerp(bottom, top, v);
+        for (int attempt = 0; attempt < 64; attempt++)
+        {
+            Vector2 candidate = new Vector2(Random.Range(minX, maxX), Random.Range(minY, maxY));
+            if (IsInsidePolygon(candidate, v))
+                return new Vector3(candidate.x, worldY, candidate.y);
+        }
 
-        return new Vector3(point.x, worldY, point.y);
+        Vector2 centroid = Vector2.zero;
+        for (int i = 0; i < v.Length; i++) centroid += v[i];
+        centroid /= v.Length;
+        return new Vector3(centroid.x, worldY, centroid.y);
     }
 
-    private static bool IsInsideQuad(Vector2 p, Vector2 a, Vector2 b, Vector2 c, Vector2 d)
+    private static bool IsInsidePolygon(Vector2 p, Vector2[] v)
     {
-        // Check if point is inside quad ABCD by testing two triangles: ABC and ACD
-        return IsInsideTriangle(p, a, b, c) || IsInsideTriangle(p, a, c, d);
+        bool inside = false;
+        int n = v.Length;
+        for (int i = 0, j = n - 1; i < n; j = i++)
+        {
+            Vector2 vi = v[i];
+            Vector2 vj = v[j];
+            if (((vi.y > p.y) != (vj.y > p.y)) &&
+                (p.x < (vj.x - vi.x) * (p.y - vi.y) / (vj.y - vi.y) + vi.x))
+            {
+                inside = !inside;
+            }
+        }
+        return inside;
     }
 
-    private static bool IsInsideTriangle(Vector2 p, Vector2 a, Vector2 b, Vector2 c)
+    private static Vector2 ClosestPointOnPolygonEdges(Vector2 p, Vector2[] v)
     {
-        float d1 = Cross(b - a, p - a);
-        float d2 = Cross(c - b, p - b);
-        float d3 = Cross(a - c, p - c);
-
-        bool hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
-        bool hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
-
-        return !(hasNeg && hasPos);
-    }
-
-    private static float Cross(Vector2 a, Vector2 b)
-    {
-        return a.x * b.y - a.y * b.x;
-    }
-
-    private static Vector2 ClosestPointOnQuadEdges(Vector2 p, Vector2 a, Vector2 b, Vector2 c, Vector2 d)
-    {
-        Vector2 closest = ClosestPointOnSegment(p, a, b);
+        int n = v.Length;
+        Vector2 closest = ClosestPointOnSegment(p, v[n - 1], v[0]);
         float bestDist = (p - closest).sqrMagnitude;
 
-        Vector2[] edges = { ClosestPointOnSegment(p, b, c), ClosestPointOnSegment(p, c, d), ClosestPointOnSegment(p, d, a) };
-        foreach (Vector2 candidate in edges)
+        for (int i = 0; i < n - 1; i++)
         {
+            Vector2 candidate = ClosestPointOnSegment(p, v[i], v[i + 1]);
             float dist = (p - candidate).sqrMagnitude;
             if (dist < bestDist)
             {
@@ -106,21 +111,23 @@ public class ScreenBoundsUtility : MonoBehaviour
     private static Vector2 ClosestPointOnSegment(Vector2 p, Vector2 a, Vector2 b)
     {
         Vector2 ab = b - a;
-        float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude);
+        float lenSq = ab.sqrMagnitude;
+        if (lenSq < 1e-8f) return a;
+        float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / lenSq);
         return a + ab * t;
     }
 
     private void OnDrawGizmos()
     {
-        Gizmos.color = Color.green;
-        Vector3 bl3 = new Vector3(bottomLeft.x, 0f, bottomLeft.y);
-        Vector3 br3 = new Vector3(bottomRight.x, 0f, bottomRight.y);
-        Vector3 tl3 = new Vector3(topLeft.x, 0f, topLeft.y);
-        Vector3 tr3 = new Vector3(topRight.x, 0f, topRight.y);
+        if (vertices == null || vertices.Length < 2) return;
 
-        Gizmos.DrawLine(bl3, br3);
-        Gizmos.DrawLine(br3, tr3);
-        Gizmos.DrawLine(tr3, tl3);
-        Gizmos.DrawLine(tl3, bl3);
+        Gizmos.color = Color.green;
+        int n = vertices.Length;
+        for (int i = 0; i < n; i++)
+        {
+            Vector2 a = vertices[i];
+            Vector2 b = vertices[(i + 1) % n];
+            Gizmos.DrawLine(new Vector3(a.x, 0f, a.y), new Vector3(b.x, 0f, b.y));
+        }
     }
 }

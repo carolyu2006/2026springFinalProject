@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 using TMPro;
 
 /// <summary>
@@ -24,6 +25,14 @@ public class StartSceneManager : MonoBehaviour
     [Header("Per-Player UI — Chatbox root (hidden once that player is ready)")]
     [SerializeField] private GameObject player1Textbox;
     [SerializeField] private GameObject player2Textbox;
+
+    [Header("Per-Player UI — Character image (swaps pending → ready)")]
+    [SerializeField] private Image player1Image;
+    [SerializeField] private Image player2Image;
+
+    [Header("Character Sprites")]
+    [SerializeField] private Sprite pendingSprite;
+    [SerializeField] private Sprite readySprite;
 
     const KeyCode P1_READY_KEY = KeyCode.R;
     const KeyCode P2_READY_KEY = KeyCode.Slash;
@@ -100,5 +109,12 @@ public class StartSceneManager : MonoBehaviour
         if (player2StatusText != null) player2StatusText.text = p2Ready ? READY_LABEL : WAITING_LABEL;
         if (player1Textbox != null) player1Textbox.SetActive(!p1Ready);
         if (player2Textbox != null) player2Textbox.SetActive(!p2Ready);
+        SetSprite(player1Image, p1Ready ? readySprite : pendingSprite);
+        SetSprite(player2Image, p2Ready ? readySprite : pendingSprite);
+    }
+
+    private static void SetSprite(Image img, Sprite sprite)
+    {
+        if (img != null && sprite != null) img.sprite = sprite;
     }
 }

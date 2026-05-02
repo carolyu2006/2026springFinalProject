@@ -1,16 +1,24 @@
 using UnityEngine;
 
-// Reads a BLE HID gamepad (ESP32 running the BleGamepad library) via Unity's
-// legacy Input API and feeds PhoneInputManager so Player.ControlScheme.ESP32
-// works identically to the old serial path.
+// Reads two BLE HID gamepads (ESP32s running the BleGamepad library) via
+// Unity's legacy Input API and feeds each one into a separate
+// PhoneInputManager slot, so the two ESP32 controllers drive the two
+// in-game characters independently.
 //
 // Firmware sends:
 //   - Left Thumbstick X/Y on the gamepad's first two axes
 //   - BUTTON_1 on joystick button 0
+//
+// The per-joystick axis names ("J1Horizontal", "J2Horizontal", etc.) are
+// defined in ProjectSettings/InputManager.asset with joyNum bound to the
+// specific joystick number, so two pads no longer get merged together.
 public class BleGamepadBridge : MonoBehaviour
 {
     [SerializeField] private float deadzone = 0.15f;
-    [SerializeField] private bool invertY = false;
+    // Most HID gamepads report joystick Y as positive-down, but the game
+    // expects positive-up (forward). Default to inverted so the ESP32 pads
+    // feel right out of the box.
+    [SerializeField] private bool invertY = true;
     [SerializeField] private bool logJoysticks = true;
 
     private bool _prevButtonP1;
@@ -35,23 +43,30 @@ public class BleGamepadBridge : MonoBehaviour
         var pim = PhoneInputManager.Instance;
         if (pim == null) return;
 
-        // Axes — legacy Input's "Horizontal"/"Vertical" already map to the
-        // gamepad's primary thumbstick on joystick 1. If there is no joystick,
-        // these may pick up keyboard arrows; that's harmless for this scene.
-        float x = Input.GetAxisRaw("Horizontal");
-        float y = Input.GetAxisRaw("Vertical");
+        FeedSlot(pim, 0, "J1Horizontal", "J1Vertical", KeyCode.Joystick1Button0, ref _prevButtonP1);
+        FeedSlot(pim, 1, "J2Horizontal", "J2Vertical", KeyCode.Joystick2Button0, ref _prevButtonP2);
+    }
+
+    private void FeedSlot(PhoneInputManager pim, int slot, string axisX, string axisY, KeyCode button, ref bool prevButton)
+    {
+        float x = SafeAxis(axisX);
+        float y = SafeAxis(axisY);
         if (invertY) y = -y;
         if (Mathf.Abs(x) < deadzone) x = 0f;
         if (Mathf.Abs(y) < deadzone) y = 0f;
-        pim.SetMovement(0, x, y);
+        pim.SetMovement(slot, x, y);
 
-        // Button — Joystick 1 is P1, Joystick 2 (if present) is P2.
-        bool p1 = Input.GetKey(KeyCode.Joystick1Button0);
-        if (p1 && !_prevButtonP1) pim.TriggerAction(0);
-        _prevButtonP1 = p1;
+        bool pressed = Input.GetKey(button);
+        if (pressed && !prevButton) pim.TriggerAction(slot);
+        prevButton = pressed;
+    }
 
-        bool p2 = Input.GetKey(KeyCode.Joystick2Button0);
-        if (p2 && !_prevButtonP2) pim.TriggerAction(1);
-        _prevButtonP2 = p2;
+    // GetAxisRaw throws if the axis isn't defined in InputManager. Defending
+    // against that lets the scene keep working in editors that haven't yet
+    // reimported the updated InputManager.asset.
+    private static float SafeAxis(string name)
+    {
+        try { return Input.GetAxisRaw(name); }
+        catch { return 0f; }
     }
 }
