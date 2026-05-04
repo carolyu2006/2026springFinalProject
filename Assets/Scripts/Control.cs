@@ -38,6 +38,11 @@ public class Control : MonoBehaviour
         {
             StartCoroutine(OrangeSpawnSchedule());
         }
+
+        if (WebSocketClient.Instance != null)
+        {
+            WebSocketClient.Instance.Send("{\"type\":\"game_started\"}");
+        }
     }
 
     private IEnumerator OrangeSpawnSchedule()
@@ -69,9 +74,16 @@ public class Control : MonoBehaviour
 
         for (int i = 0; i < playerCount; i++)
         {
+            // P1 (CrowCode) spawns in the left half of the play area, P2
+            // (OpenCrow) in the right half, so the BLE-paired controller maps
+            // to a consistent on-screen side.
+            Vector3 spawnPos = playerCount == 2
+                ? GetSideSpawnPosition(i == 0 ? -1 : 1)
+                : GetRandomSpawnPosition();
+
             Player spawnedPlayer = Instantiate(
                 playerPrefab,
-                GetRandomSpawnPosition(),
+                spawnPos,
                 Quaternion.identity);
             Player.ControlScheme scheme = GetControlScheme(i);
             spawnedPlayer.Initialize(i, scheme, moveSpeed);
@@ -125,6 +137,27 @@ public class Control : MonoBehaviour
             pos = ScreenBoundsUtility.GetRandomPointInsideVisibleWorld(spawnY);
         }
         return pos;
+    }
+
+    // sideSign: -1 for left half (x < 0), +1 for right half (x > 0). Falls
+    // back to any sampled point if no clear position on the desired side
+    // turns up after the clearance budget is exhausted.
+    private Vector3 GetSideSpawnPosition(int sideSign)
+    {
+        Vector3 fallback = Vector3.zero;
+        bool haveFallback = false;
+
+        for (int i = 0; i < spawnClearanceAttempts; i++)
+        {
+            Vector3 pos = ScreenBoundsUtility.GetRandomPointInsideVisibleWorld(spawnY);
+            bool onCorrectSide = sideSign < 0 ? pos.x < 0f : pos.x > 0f;
+            if (!onCorrectSide) continue;
+
+            if (!haveFallback) { fallback = pos; haveFallback = true; }
+            if (IsSpawnPositionClear(pos)) return pos;
+        }
+
+        return haveFallback ? fallback : GetRandomSpawnPosition();
     }
 
     /// <summary>

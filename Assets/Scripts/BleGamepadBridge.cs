@@ -21,6 +21,12 @@ public class BleGamepadBridge : MonoBehaviour
     [SerializeField] private bool invertY = true;
     [SerializeField] private bool logJoysticks = true;
 
+    // Substring matched (case-insensitive) against Input.GetJoystickNames() to
+    // decide which physical pad drives which player slot, so pairing order
+    // doesn't determine identity.
+    [SerializeField] private string player1DeviceName = "Orango One";
+    [SerializeField] private string player2DeviceName = "Orango Two";
+
     private bool _prevButtonP1;
     private bool _prevButtonP2;
     private float _nameLogTimer;
@@ -43,12 +49,63 @@ public class BleGamepadBridge : MonoBehaviour
         var pim = PhoneInputManager.Instance;
         if (pim == null) return;
 
-        FeedSlot(pim, 0, "J1Horizontal", "J1Vertical", KeyCode.Joystick1Button0, ref _prevButtonP1);
-        FeedSlot(pim, 1, "J2Horizontal", "J2Vertical", KeyCode.Joystick2Button0, ref _prevButtonP2);
+        ResolveJoystickNumbers(out int p1JoyNum, out int p2JoyNum);
+
+        FeedSlot(pim, 0, p1JoyNum, ref _prevButtonP1);
+        FeedSlot(pim, 1, p2JoyNum, ref _prevButtonP2);
     }
 
-    private void FeedSlot(PhoneInputManager pim, int slot, string axisX, string axisY, KeyCode button, ref bool prevButton)
+    // Returns 1-based Unity joystick numbers for P1 and P2 by matching device
+    // names. Falls back to OS enumeration order (1→P1, 2→P2) when neither name
+    // matches; if only one matches, the other slot takes the remaining number.
+    private void ResolveJoystickNumbers(out int p1JoyNum, out int p2JoyNum)
     {
+        int p1 = FindJoystickByName(player1DeviceName);
+        int p2 = FindJoystickByName(player2DeviceName);
+
+        if (p1 == 0 && p2 == 0)
+        {
+            p1JoyNum = 1;
+            p2JoyNum = 2;
+            return;
+        }
+
+        if (p1 == 0) p1 = (p2 == 1) ? 2 : 1;
+        if (p2 == 0) p2 = (p1 == 1) ? 2 : 1;
+
+        p1JoyNum = p1;
+        p2JoyNum = p2;
+    }
+
+    private static int FindJoystickByName(string needle)
+    {
+        if (string.IsNullOrEmpty(needle)) return 0;
+        var names = Input.GetJoystickNames();
+        for (int i = 0; i < names.Length; i++)
+        {
+            if (!string.IsNullOrEmpty(names[i])
+                && names[i].IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return i + 1;
+        }
+        return 0;
+    }
+
+    private void FeedSlot(PhoneInputManager pim, int slot, int joyNum, ref bool prevButton)
+    {
+        if (joyNum < 1 || joyNum > 2)
+        {
+            // Only J1*/J2* axes are defined in InputManager. A joystick number
+            // outside that range means the matching pad isn't connected on a
+            // slot we can read; leave the player idle rather than guessing.
+            pim.SetMovement(slot, 0f, 0f);
+            prevButton = false;
+            return;
+        }
+
+        string axisX = joyNum == 1 ? "J1Horizontal" : "J2Horizontal";
+        string axisY = joyNum == 1 ? "J1Vertical"   : "J2Vertical";
+        KeyCode button = joyNum == 1 ? KeyCode.Joystick1Button0 : KeyCode.Joystick2Button0;
+
         float x = SafeAxis(axisX);
         float y = SafeAxis(axisY);
         if (invertY) y = -y;

@@ -62,6 +62,11 @@ public class GameManager : MonoBehaviour
             WinnerPlayerIndex = (bestCount > 0 && !tied) ? bestIndex : -1;
         }
 
+        if (WebSocketClient.Instance != null)
+        {
+            WebSocketClient.Instance.Send("{\"type\":\"game_ended\"}");
+        }
+
         SceneManager.LoadScene(ResolveEndSceneName());
     }
 

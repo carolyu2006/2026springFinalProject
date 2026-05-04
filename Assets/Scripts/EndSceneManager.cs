@@ -9,6 +9,10 @@ public class EndSceneManager : MonoBehaviour
     [Header("Scene Flow")]
     [SerializeField] private Button restartButton;
     [SerializeField] private string startSceneName = "StartScene";
+    [SerializeField] private string arduinoStartSceneName = "ArduinoStartScene";
+    [SerializeField] private string phoneStartSceneName = "PhoneStartScene";
+    [Tooltip("Ignore attack-button restart for this many seconds after the EndScene loads, so the press that ended the game doesn't immediately bounce back.")]
+    [SerializeField] private float restartInputDelay = 1.0f;
 
     [Header("Text 1 (slides in, holds, slides out)")]
     [SerializeField] private RectTransform text1Chinese;
@@ -61,10 +65,37 @@ public class EndSceneManager : MonoBehaviour
     [Tooltip("How long text 2 stays before the winner is revealed (used when no text2Audio is set).")]
     [SerializeField] private float text2FallbackHold = 0.5f;
 
+    private float _enabledTime;
+    private bool _restarting;
+
     private void Awake()
     {
         if (restartButton != null)
             restartButton.onClick.AddListener(OnRestartClicked);
+        _enabledTime = Time.unscaledTime;
+    }
+
+    private void Update()
+    {
+        if (_restarting) return;
+        if (Time.unscaledTime - _enabledTime < restartInputDelay) return;
+        if (AnyAttackPressed()) OnRestartClicked();
+    }
+
+    private bool AnyAttackPressed()
+    {
+        if (Input.GetKeyDown(KeyCode.R)) return true;
+        if (Input.GetKeyDown(KeyCode.Slash)) return true;
+        if (Input.GetKeyDown(KeyCode.Space)) return true;
+        if (Input.GetKeyDown(KeyCode.Return)) return true;
+
+        var pim = PhoneInputManager.Instance;
+        if (pim != null)
+        {
+            if (pim.ConsumeAction(0)) return true;
+            if (pim.ConsumeAction(1)) return true;
+        }
+        return false;
     }
 
     private void Start()
@@ -116,12 +147,13 @@ public class EndSceneManager : MonoBehaviour
 
     private void SetupPlayerNames()
     {
-        bool phoneMode = GameConfig.Instance != null && GameConfig.Instance.Mode == ControlMode.Phone;
+        var cfg = GameConfig.Instance;
+        bool showNames = cfg != null && (cfg.Mode == ControlMode.Phone || cfg.Mode == ControlMode.ESP32);
         string name1 = null;
         string name2 = null;
-        if (phoneMode)
+        if (showNames)
         {
-            var names = GameConfig.Instance.PlayerNames;
+            var names = cfg.PlayerNames;
             if (names != null)
             {
                 if (names.Length > 0) name1 = names[0];
@@ -288,6 +320,21 @@ public class EndSceneManager : MonoBehaviour
 
     private void OnRestartClicked()
     {
-        SceneManager.LoadScene(startSceneName);
+        if (_restarting) return;
+        _restarting = true;
+        SceneManager.LoadScene(ResolveStartScene());
+    }
+
+    private string ResolveStartScene()
+    {
+        var cfg = GameConfig.Instance;
+        if (cfg != null)
+        {
+            if (cfg.Mode == ControlMode.ESP32 && !string.IsNullOrEmpty(arduinoStartSceneName))
+                return arduinoStartSceneName;
+            if (cfg.Mode == ControlMode.Phone && !string.IsNullOrEmpty(phoneStartSceneName))
+                return phoneStartSceneName;
+        }
+        return startSceneName;
     }
 }

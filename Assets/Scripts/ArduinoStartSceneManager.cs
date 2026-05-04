@@ -58,8 +58,10 @@ public class ArduinoStartSceneManager : MonoBehaviour
     const KeyCode P2_READY_KEY = KeyCode.Slash;
 
     const string WAITING_LABEL = "WAITING...";
-    const string READY_LABEL = "READY!";
+    const string READY_PREFIX = "Hi ";
     const string HINT_TEXT = "Press the joystick button to join!";
+    const string PLAYER1_NAME = "CrowCode";
+    const string PLAYER2_NAME = "OpenCrow";
 
     private readonly JoinSource[] _slotSource = new JoinSource[2] { JoinSource.None, JoinSource.None };
     private bool loading;
@@ -181,10 +183,16 @@ public class ArduinoStartSceneManager : MonoBehaviour
 
     private void TryClaimSlot(JoinSource source)
     {
-        // Don't let a single source claim both slots.
-        if (_slotSource[0] == source || _slotSource[1] == source) return;
+        // Each source is locked to a specific slot, so the Orango One pad
+        // (resolved by BleGamepadBridge by device name) always becomes
+        // CrowCode/left and Orango Two always becomes OpenCrow/right —
+        // independent of which one presses to join first.
+        int slot = SlotFor(source);
+        if (slot < 0) return;
 
-        int slot = _slotSource[0] == JoinSource.None ? 0 : 1;
+        // Slot already claimed by some other source — ignore the press.
+        if (_slotSource[slot] != JoinSource.None) return;
+
         _slotSource[slot] = source;
 
         var cfg = GameConfig.Instance;
@@ -193,36 +201,22 @@ public class ArduinoStartSceneManager : MonoBehaviour
             cfg.PlayerSchemes[slot] = SchemeFor(source, slot);
             cfg.PlayerSchemeAssigned[slot] = true;
             cfg.EspIndexForSlot[slot] = EspSerialIndex(source);
-            cfg.PlayerNames[slot] = ResolveDisplayName(source);
+            cfg.PlayerNames[slot] = slot == 0 ? PLAYER1_NAME : PLAYER2_NAME;
         }
 
         RefreshStatus();
     }
 
-    // For ESP32 sources, prefer the BLE controller's advertised name (e.g.
-    // "Orango 1") so it carries through to gameplay/end scenes. Falls back
-    // to "Orango 1"/"Orango 2" if the OS hasn't surfaced a name yet.
-    private static string ResolveDisplayName(JoinSource source)
+    private static int SlotFor(JoinSource source)
     {
         switch (source)
         {
-            case JoinSource.Esp32P1: return JoystickNameOrFallback(0, "Orango 1");
-            case JoinSource.Esp32P2: return JoystickNameOrFallback(1, "Orango 2");
-            case JoinSource.KeyR: return "Player 1";
-            case JoinSource.KeySlash: return "Player 2";
+            case JoinSource.KeyR:     return 0;  // keyboard P1 fallback
+            case JoinSource.Esp32P1:  return 0;  // Orango One → CrowCode (left)
+            case JoinSource.KeySlash: return 1;  // keyboard P2 fallback
+            case JoinSource.Esp32P2:  return 1;  // Orango Two → OpenCrow (right)
         }
-        return "";
-    }
-
-    private static string JoystickNameOrFallback(int joystickIndex, string fallback)
-    {
-        var names = Input.GetJoystickNames();
-        if (joystickIndex >= 0 && joystickIndex < names.Length)
-        {
-            string n = names[joystickIndex];
-            if (!string.IsNullOrWhiteSpace(n)) return n;
-        }
-        return fallback;
+        return -1;
     }
 
     private static int EspSerialIndex(JoinSource source)
@@ -249,16 +243,18 @@ public class ArduinoStartSceneManager : MonoBehaviour
     {
         bool p1Ready = _slotSource[0] != JoinSource.None;
         bool p2Ready = _slotSource[1] != JoinSource.None;
-        if (player1StatusText != null) player1StatusText.text = p1Ready ? READY_LABEL : WAITING_LABEL;
-        if (player2StatusText != null) player2StatusText.text = p2Ready ? READY_LABEL : WAITING_LABEL;
+        var names = GameConfig.Instance != null ? GameConfig.Instance.PlayerNames : null;
+        string p1Name = names != null ? (names[0] ?? PLAYER1_NAME) : PLAYER1_NAME;
+        string p2Name = names != null ? (names[1] ?? PLAYER2_NAME) : PLAYER2_NAME;
+        if (player1StatusText != null) player1StatusText.text = p1Ready ? READY_PREFIX + p1Name : WAITING_LABEL;
+        if (player2StatusText != null) player2StatusText.text = p2Ready ? READY_PREFIX + p2Name : WAITING_LABEL;
         if (player1Textbox != null) player1Textbox.SetActive(!p1Ready);
         if (player2Textbox != null) player2Textbox.SetActive(!p2Ready);
         SetSprite(player1Image, p1Ready ? readySprite : pendingSprite);
         SetSprite(player2Image, p2Ready ? readySprite : pendingSprite);
 
-        var names = GameConfig.Instance != null ? GameConfig.Instance.PlayerNames : null;
-        if (player1NameText != null) player1NameText.text = p1Ready && names != null ? (names[0] ?? "") : "";
-        if (player2NameText != null) player2NameText.text = p2Ready && names != null ? (names[1] ?? "") : "";
+        if (player1NameText != null) player1NameText.text = "";
+        if (player2NameText != null) player2NameText.text = "";
     }
 
     private static void SetSprite(Image img, Sprite sprite)
